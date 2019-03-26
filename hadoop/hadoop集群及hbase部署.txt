@@ -1,0 +1,740 @@
+Hadoop
+
+	应用于大数据领域
+	高可靠性、扩展性、适用于数据的分布式运算
+	
+Hadoop核心组件：
+
+	1、hdfs	Hadoop Distributed File system    Hadoop分布式文件系统
+	
+		hdfs支持扩展成百上千的机器
+		hdfs可以部署廉价的服务器
+		高可靠性，提供数据冗余能力
+		以块block为单位，默认为64M
+		以流的方式存储数据
+		一次写、多次读的应用场景
+		适用于存储GB到TB级别的数据
+		使用Java编写
+		
+		hdfs角色：
+			NameNode 	
+				接受客户端上传、读取的请求
+				记录数据的元数据metadata信息
+				
+			DataNode
+				存储真实数据
+		
+	2、Map-Reduce
+	
+		YARN 资源调度器
+		
+
+
+
+
+
+
+环境描述：
+
+	namenode01	192.168.122.101
+	namenode02	192.168.122.102
+	
+	datanode01	192.168.122.103
+	datanode02	192.168.122.104
+	datanode03	192.168.122.105
+
+
+一、准备工作
+	
+	配置各节点IP地址、主机名
+	配置节点的密钥ssh
+	配置主机名称解析
+	配置各节点时间同步
+	关闭防火墙、SELinux
+	所有节点安装JDK
+
+
+二、在datanode上安装zookeeper
+
+[root@datanode01 ~]# tar xf zookeeper-3.4.8.tar.gz -C /app/
+[root@datanode01 ~]# cd /app/zookeeper-3.4.8/conf
+[root@datanode01 conf]# cp zoo_sample.cfg zoo.cfg
+
+[root@datanode01 conf]# vim zoo.cfg 
+
+
+	dataDir=/app/zookeeper-3.4.8/data/zookeeper
+	
+	server.1 = datanode01:2888:3888
+	server.2 = datanode02:2888:3888
+	server.3 = datanode03:2888:3888
+
+[root@datanode01 ~]# mkdir /app/zookeeper-3.4.8/data/zookeeper -p
+[root@datanode01 ~]# echo 1 > /app/zookeeper-3.4.8/data/zookeeper/myid
+
+将安装完成的zookeeper分别复制到另外两个datanode，并修改myid文件内容 
+
+验证zookeeper安装
+
+分别在datanode上启动zookeeper，查看启动进程及角色 
+
+[root@datanode01 ~]# /app/zookeeper-3.4.8/bin/zkServer.sh start
+ZooKeeper JMX enabled by default
+Using config: /app/zookeeper-3.4.8/bin/../conf/zoo.cfg
+Starting zookeeper ... STARTED
+
+[root@datanode01 ~]# jps
+1301 QuorumPeerMain
+1326 Jps
+[root@datanode01 ~]# 
+
+
+[root@datanode01 ~]# /app/zookeeper-3.4.8/bin/zkServer.sh status
+ZooKeeper JMX enabled by default
+Using config: /app/zookeeper-3.4.8/bin/../conf/zoo.cfg
+Mode: follower
+
+[root@datanode02 zookeeper]# /app/zookeeper-3.4.8/bin/zkServer.sh status
+ZooKeeper JMX enabled by default
+Using config: /app/zookeeper-3.4.8/bin/../conf/zoo.cfg
+Mode: leader
+
+[root@datanode03 zookeeper]# /app/zookeeper-3.4.8/bin/zkServer.sh status
+ZooKeeper JMX enabled by default
+Using config: /app/zookeeper-3.4.8/bin/../conf/zoo.cfg
+Mode: follower
+
+
+
+三、在namenode01安装配置hadoop
+
+1) 安装hadoop
+
+[root@namenode01 hadoop]# tar xf hadoop-2.7.3.tar.gz -C /app/
+
+[root@namenode01 hadoop]# vim /etc/profile
+
+	export JAVA_HOME=/app/jdk1.8.0_91
+	export HADOOP_HOME=/app/hadoop-2.7.3
+	export PATH=$PATH:$JAVA_HOME/bin:$HADOOP_HOME/bin
+
+[root@namenode01 hadoop]# source /etc/profile
+
+
+
+2) 编辑core-site.xml配置文件 
+
+<configuration>
+
+	# The name of the default file system
+    <property>
+        <name>fs.defaultFS</name>
+        <value>hdfs://cluster1</value>
+    </property>
+
+	#A base for other temporary directories.
+    <property>
+        <name>hadoop.tmp.dir</name>
+        <value>/app/hadoop-2.7.3/tmp</value>
+    </property>
+
+	#A list of ZooKeeper server addresses,that are to be used by the ZKFailoverController in automatic failover.
+    <property>
+        <name>ha.zookeeper.quorum</name>
+        <value>datanode01:2181,datanode02:2181,datanode03:2181</value>
+    </property>
+
+</configuration>
+
+
+
+3) 编辑hdfs-site配置文件 
+
+<configuration>
+
+	<property>
+		<name>dfs.nameservices</name>
+		<value>cluster1</value>
+	</property>
+
+	# The prefix for a given nameservice, contains a list of namenodes for a given nameservice 
+	<property>
+		<name>dfs.ha.namenodes.cluster1</name>
+		<value>namenode01,namenode02</value>
+	</property>
+
+	# RPC address that handles all clients requests.
+	<property>
+		<name>dfs.namenode.rpc-address.cluster1.namenode01</name>
+		<value>namenode01:9000</value>
+	</property>
+
+	<property>
+		<name>dfs.namenode.rpc-address.cluster1.namenode02</name>
+		<value>namenode02:9000</value>
+	</property>
+
+	# The address and the base port where the dfs namenode web ui will listen on.
+	<property>
+		<name>dfs.namenode.http-address.cluster1.namenode01</name>
+		<value>namenode01:50070</value>
+	</property>
+
+	<property>
+		<name>dfs.namenode.http-address.cluster1.namenode02</name>
+		<value>namenode02:50070</value>
+	</property>
+
+	# A directory on shared storage between the multiple namenodes in an HA cluster. 
+	<property>
+		<name>dfs.namenode.shared.edits.dir</name>
+		<value>qjournal://datanode01:8485;datanode02:8485;datanode03:8485/cluster1</value>
+	</property>
+	
+	<property>
+		<name>dfs.journalnode.edits.dir</name>
+		<value>/app/hadoop-2.7.3/data/tmp/journal</value>
+	</property>
+
+	<property>
+		<name>dfs.client.failover.proxy.provider.cluster1</name>
+		<value>org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider</value>
+	</property>
+
+	<property>
+		<name>dfs.ha.fencing.methods</name>
+		<value>sshfence</value>
+	</property>
+
+	<property>
+		<name>dfs.ha.fencing.ssh.private-key-files</name>
+		<value>/root/.ssh/id_rsa</value>
+	</property>
+
+	<property>
+		<name>dfs.ha.automatic-failover.enabled</name>
+		<value>true</value>
+	</property>
+
+	<property>
+		<name>dfs.namenode.name.dir</name>
+		<value>/app/hadoop-2.7.3/data/dfs/name</value>
+	</property>
+
+	<property>
+		<name>dfs.datanode.data.dir</name>
+		<value>/app/hadoop-2.7.3/data/dfs/data</value>
+	</property>
+
+	<property>
+		<name>dfs.replication</name>
+		<value>3</value>
+	</property>
+
+	# Enable WebHDFS in Namenodes and Datanodes.
+	<property>
+		<name>dfs.webhdfs.enabled</name>
+		<value>true</value>
+	</property>
+
+	# The address and port the JournalNode HTTP server listens on.
+	<property>
+		<name>dfs.journalnode.http-address</name>
+		<value>0.0.0.0:8480</value>
+	</property>
+
+	# The JournalNode RPC server address and port.
+	<property>
+		<name>dfs.journalnode.rpc-address</name>
+		<value>0.0.0.0:8485</value>
+	</property>
+
+	<property>
+		<name>ha.zookeeper.quorum</name>
+		<value>datanode01:2181,datanode02:2181,datanode03:2181</value>
+	</property>
+
+</configuration>
+
+namenode实现高可用sshfence需要依赖psmisc软件
+
+[root@namenode01 ~]# yum install -y psmisc
+[root@namenode02 ~]# yum install -y psmisc
+
+
+
+4) 编辑mapred-site.xml 
+
+<configuration>
+	
+	# The runtime framework for executing MapReduce jobs.
+    <property>
+        <name>mapreduce.framework.name</name>
+        <value>yarn</value>
+    </property>
+
+	# MapReduce JobHistory Server IPC host:port
+
+    <property>
+        <name>mapreduce.jobhistory.address</name>
+        <value>namenode01:10020</value>
+    </property>
+
+	# MapReduce JobHistory Server Web UI host:port
+	
+    <property>
+        <name>mapreduce.jobhistory.webapp.address</name>
+        <value>namenode01:19888</value>
+    </property>
+	
+</configuration>
+
+
+
+5) 编辑yarn-site.xml 
+
+<configuration>
+
+	# How often to try connecting to the ResourceManager.
+	<property>
+        <name>yarn.resourcemanager.connect.retry-interval.ms</name>
+        <value>2000</value>
+    </property>
+
+	# Enable RM high-availability
+	
+    <property>
+        <name>yarn.resourcemanager.ha.enabled</name>
+        <value>true</value>
+    </property>
+
+	# 	The list of RM nodes in the cluster when HA is enabled
+	
+    <property>
+        <name>yarn.resourcemanager.ha.rm-ids</name>
+        <value>rm1,rm2</value>
+    </property>
+
+    <property>
+        <name>ha.zookeeper.quorum</name>
+        <value>datanode01:2181,datanode02:2181,datanode03:2181</value>
+    </property>
+
+	# Enable automatic failover. By default, it is enabled only when HA is enabled
+
+    <property>
+        <name>yarn.resourcemanager.ha.automatic-failover.enabled</name>
+        <value>true</value>
+    </property>
+
+	# The hostname of the RM.
+
+    <property>
+        <name>yarn.resourcemanager.hostname.rm1</name>
+        <value>namenode01</value>
+    </property>
+
+    <property>
+        <name>yarn.resourcemanager.hostname.rm2</name>
+        <value>namenode02</value>
+    </property>
+
+	# The id (string) of the current RM,将配置文件拷贝到另一个节点时需要对应修改此值
+	
+    <property>
+        <name>yarn.resourcemanager.ha.id</name>
+        <value>rm1</value>
+    </property>
+
+	# Enable RM to recover state after starting
+	
+    <property>
+        <name>yarn.resourcemanager.recovery.enabled</name>
+        <value>true</value>
+    </property>
+
+    <property>
+        <name>yarn.resourcemanager.zk-state-store.address</name>
+        <value>datanode01:2181,datanode02:2181,datanode03:2181</value>
+    </property>
+
+    <property>
+        <name>yarn.resourcemanager.store.class</name>
+        <value>org.apache.hadoop.yarn.server.resourcemanager.recovery.ZKRMStateStore</value>
+    </property>
+
+    <property>
+        <name>yarn.resourcemanager.zk-address</name>
+        <value>datanode01:2181,datanode02:2181,datanode03:2181</value>
+    </property>
+
+	# Name of the cluster
+    <property>
+        <name>yarn.resourcemanager.cluster-id</name>
+        <value>cluster1-yarn</value>
+    </property>
+
+    <property>
+        <name>yarn.app.mapreduce.am.scheduler.connection.wait.interval-ms</name>
+        <value>5000</value>
+    </property>
+
+	# The address of the in the RM.
+
+    <property>
+        <name>yarn.resourcemanager.address.rm1</name>
+        <value>namenode01:8132</value>
+    </property>
+
+	# The address of the scheduler interface.
+
+    <property>
+        <name>yarn.resourcemanager.scheduler.address.rm1</name>
+        <value>namenode01:8130</value>
+    </property>
+
+	# The http address of the RM web application.
+
+    <property>
+        <name>yarn.resourcemanager.webapp.address.rm1</name>
+        <value>namenode01:8188</value>
+    </property>
+
+    <property>
+        <name>yarn.resourcemanager.resource-tracker.address.rm1</name>
+        <value>namenode01:8131</value>
+    </property>
+
+	# The address of the RM admin interface.
+
+    <property>
+        <name>yarn.resourcemanager.admin.address.rm1</name>
+        <value>namenode01:8033</value>
+    </property>
+
+    <property>
+        <name>yarn.resourcemanager.ha.admin.address.rm1</name>
+        <value>namenode01:23142</value>
+    </property>
+
+    <property>
+        <name>yarn.resourcemanager.address.rm2</name>
+        <value>namenode02:8132</value>
+    </property>
+
+    <property>
+        <name>yarn.resourcemanager.scheduler.address.rm2</name>
+        <value>namenode02:8130</value>
+    </property>
+
+    <property>
+        <name>yarn.resourcemanager.webapp.address.rm2</name>
+        <value>namenode02:8188</value>
+    </property>
+
+    <property>
+        <name>yarn.resourcemanager.resource-tracker.address.rm2</name>
+        <value>namenode02:8131</value>
+    </property>
+
+    <property>
+        <name>yarn.resourcemanager.admin.address.rm2</name>
+        <value>namenode02:8033</value>
+    </property>
+
+    <property>
+        <name>yarn.resourcemanager.ha.admin.address.rm2</name>
+        <value>namenode02:23142</value>
+    </property>
+
+	# the valid service name should only contain a-zA-Z0-9_ 
+	
+    <property>
+        <name>yarn.nodemanager.aux-services</name>
+        <value>mapreduce_shuffle</value>
+    </property>
+
+    <property>
+        <name>yarn.nodemanager.aux-services.mapreduce.shuffle.class</name>
+        <value>org.apache.hadoop.mapred.ShuffleHandler</value>
+    </property>
+
+	# 	List of directories to store localized files in
+	
+    <property>
+        <name>yarn.nodemanager.local-dirs</name>
+        <value>/app/hadoop-2.7.3/data/yarn/local</value>
+    </property>
+	
+	# 	Where to store container logs.
+	
+    <property>
+        <name>yarn.nodemanager.log-dirs</name>
+        <value>/app/hadoop-2.7.3/log/yarn</value>
+    </property>
+
+    <property>
+        <name>mapreduce.shuffle.port</name>
+        <value>23080</value>
+    </property>
+
+	# 	When HA is enabled, the class to be used by Clients
+	
+    <property>
+        <name>yarn.client.failover-proxy-provider</name>
+        <value>org.apache.hadoop.yarn.client.ConfiguredRMFailoverProxyProvider</value>
+    </property>
+
+	# The base znode path to use for storing leader information, when using ZooKeeper based leader election.
+	
+    <property>
+        <name>yarn.resourcemanager.ha.automatic-failover.zk-base-path</name>
+        <value>/yarn-leader-election</value>
+    </property>
+	
+</configuration>
+
+6) 编辑slaves文件 
+
+[root@namenode01 hadoop]# cat slaves 
+datanode01
+datanode02
+datanode03
+
+将配置好的hadoop复制到其他节点
+
+7) 编辑hadoop-env.sh文件 
+
+export JAVA_HOME=/app/jdk1.8.0_91
+
+
+8) 编辑yarn-env.sh文件 
+
+export JAVA_HOME=/app/jdk1.8.0_91
+
+
+将配置好的hadoop复制到其他节点
+
+
+
+
+四、启动hdfs命令
+
+1) 启动journalnode
+
+[root@namenode01 ~]# /app/hadoop-2.7.3/sbin/hadoop-daemons.sh start journalnode
+
+[root@datanode01 ~]# jps
+1301 QuorumPeerMain
+10365 JournalNode
+10415 Jps
+
+[root@datanode02 ~]# jps
+1236 QuorumPeerMain
+10296 JournalNode
+10346 Jps
+
+[root@datanode03 ~]# jps
+10314 JournalNode
+10363 Jps
+1260 QuorumPeerMain
+
+2) 格式化hdfs
+
+[root@namenode01 ~]# hadoop namenode -format
+[root@namenode01 ~]# scp -r /app/hadoop-2.7.3/data/ namenode02:/app/hadoop-2.7.3/ 
+
+3) 格式化zk
+
+[root@namenode01 ~]# hdfs zkfc -formatZK
+
+4) 在namenode01上启动dfs, yarn 
+
+[root@namenode01 sbin]# ./start-dfs.sh 
+[root@namenode01 sbin]# ./start-yarn.sh
+
+[root@namenode01 sbin]# jps
+11392 ResourceManager
+10998 NameNode
+11289 DFSZKFailoverController
+11471 Jps
+
+5) 在namenode02上启动namenode, yarn 
+
+[root@namenode02 sbin]# ./hadoop-daemon.sh start namenode
+[root@namenode02 sbin]# ./yarn-daemon.sh start resourcemanager
+
+[root@namenode02 sbin]# jps
+10501 ResourceManager
+10901 Jps
+10823 NameNode
+10360 DFSZKFailoverController
+
+ 
+五、结果验证：
+
+1、通过以下地址访问查看namenode状态
+
+	http://192.168.122.101:50070
+	
+2、通过以下地址访问查看yarn cluster状态
+
+	http://192.168.122.101:8188
+
+
+3、验证NameNode, Yarn的HA切换 
+
+	
+	
+	
+	
+
+示例：在hadoop平台运行mapreduce程序，统计hdfs文件系统中某文件中的单词出现的个数 
+
+1) 向hdfs文件系统上传文件 
+
+[root@namenode01 ~]# hdfs dfs -put /tmp/1.txt /1.txt
+[root@namenode01 ~]# hdfs dfs -ls /
+Found 4 items
+-rw-r--r--   3 root supergroup         50 2017-10-17 09:49 /1.txt
+
+
+2) 运行mapreduce程序 
+
+[root@namenode01 mapreduce]# yarn jar hadoop-mapreduce-examples-2.7.3.jar wordcount /1.txt /result
+
+[root@namenode01 ~]# hdfs dfs -ls /
+Found 3 items
+-rw-r--r--   3 root supergroup         50 2017-10-17 09:49 /1.txt
+drwxr-xr-x   - root supergroup          0 2017-10-17 09:55 /result
+drwx------   - root supergroup          0 2017-10-17 09:54 /tmp
+
+[root@namenode01 ~]# hdfs dfs -ls /result
+Found 2 items
+-rw-r--r--   3 root supergroup          0 2017-10-17 09:55 /result/_SUCCESS
+-rw-r--r--   3 root supergroup         45 2017-10-17 09:55 /result/part-r-00000
+
+
+3) 查看结果 
+
+[root@namenode01 ~]# hdfs dfs -cat /result/part-r-00000
+cat	1
+dog	1
+he	4
+like	3
+love	1
+she	1
+tiger	1
+
+
+
+
+
+
+
+
+
+
+
+
+
+部署HBase
+
+	前提：确保hadoop平台正常
+
+1) 解压缩hbase
+
+[root@namenode01 ~]# tar xf hbase-1.2.6-bin.tar.gz -C /app/
+
+2) 编辑hbase-env.sh文件 
+
+	export JAVA_HOME=/app/jdk1.8.0_91
+	export HBASE_MANAGES_ZK=false
+
+
+3) 编辑hbase-site.xml文件 
+
+<configuration>
+	
+	# list of servers in the ZooKeeper
+	
+	<property>
+		<name>hbase.zookeeper.quorum</name>
+		<value>datanode01:2181,datanode02:2181,datanode03:2181</value>
+	</property>
+
+	# Property from ZooKeeper’s config zoo.cfg. The port at which the clients will connect.
+	
+	<property>
+		<name>hbase.zookeeper.property.clientport</name>
+		<value>2181</value>
+	</property>
+
+	# Property from ZooKeeper’s config zoo.cfg. The directory where the snapshot is stored.
+	
+	<property>
+		<name>hbase.zookeeper.property.dataDir</name>
+		<value>/app/hadoop-2.7.3/data/zookeeper</value>
+	</property>
+
+	<property>
+		<name>hbase.rootdir</name>
+		<value>hdfs://cluster1/hbase</value>
+	</property>
+
+	<property>
+		<name>hbase.cluster.distributed</name>
+		<value>true</value>
+	</property>
+
+</configuration>
+
+
+4) 编辑regionserver文件 
+
+[root@namenode01 conf]# cat regionservers 
+
+	datanode01
+	datanode02
+	datanode03
+
+将hbase配置好的文件复制到其他节点，启动hbase
+
+在启动hbase过程中，错误信息"Caused by: java.lang.IllegalArgumentException: java.net.UnknownHostException: cluster1"
+
+解决方法：
+	将hadoop的配置文件core-site.xml, hdfs-site.xml复制到hbase的配置文件目录
+
+
+
+5) 打开hbase终端，验证操作
+
+[root@namenode01 ~]# /app/hbase-1.2.6/bin/hbase shell
+
+
+hbase(main):001:0> list
+TABLE                                                                                                                    
+0 row(s) in 0.4800 seconds
+
+=> []
+hbase(main):002:0> create 'tb1','info'
+0 row(s) in 9.0790 seconds
+
+=> Hbase::Table - tb1
+hbase(main):003:0> list
+TABLE                                                                                                                    
+tb1                                                                                                                      
+1 row(s) in 0.0130 seconds
+
+=> ["tb1"]
+hbase(main):004:0> exit
+
+
+注意：
+
+登录HBase进行操作时，一直遇到ERROR: org.apache.hadoop.hbase.PleaseHoldException: Master is initializing错误
+
+由于时间不同步导致，确保各节点时间同步后，重启hbase后正常 
+
+
+
